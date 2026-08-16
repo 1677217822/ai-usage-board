@@ -1,0 +1,8 @@
+{
+  "prices": {
+    "<来源>": { "input": 20, "cacheRead": 2, "cacheCreate": 20, "output": 100, "cur": "¥" }
+  },
+  "modelPrices": {
+    "<模型>": { "input": 20, "cacheRead": 2, "cacheCreate": 20, "output": 100, "cur": "¥" }
+  }
+}
