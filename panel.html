@@ -474,7 +474,7 @@ function renderSessions(){
     const rc=rate>=80?'rh':rate>=40?'rm':'rl';
     return`<tr class="expander" onclick="pickSession('${a.sid}')" title="点击筛选该会话">
     <td class="muted num">${i+1}</td>
-    <td><div>${esc(a.title.slice(0,30))}</div>${a.cwd?`<div class="mini muted" title="${esc(a.cwd)}">${esc(shortDir(a.cwd))}</div>`:''}</td>
+    <td><div title="${esc(a.sid)}">${esc(a.title.slice(0,30))}</div>${a.cwd?`<div class="mini muted" title="${esc(a.cwd)}">${esc(shortDir(a.cwd))}</div>`:''}</td>
     <td><span class="tag ${SRC_TAG[a.source]||'b'}">${SRC_LABEL[a.source]||a.source}</span></td>
     <td><span class="tag ${modelCls(a.model)}">${esc(a.model)}</span></td>
     <td class="num">${a.requests}</td>
@@ -1075,7 +1075,7 @@ function renderRows(){
     const rc=rate==null?'':rate>=80?'rh':rate>=40?'rm':'rl';
     let h=`<tr class="expander" onclick="toggleRow(${i})">
     <td class="num">${r.time}</td>
-    <td title="${esc(r.sid)}">${esc(r.title.slice(0,26))}${r.agent!=='main'?` <span class="tag o">${r.agent}</span>`:''}</td>
+    <td title="${esc(r.sid)}${r.cwd?'&#10;'+esc(r.cwd):''}">${esc(r.title.slice(0,26))}${r.agent!=='main'?` <span class="tag o">${r.agent}</span>`:''}</td>
     <td><span class="tag ${SRC_TAG[r.source]||'b'}">${SRC_LABEL[r.source]||r.source}</span></td>
     <td><span class="tag ${modelCls(r.model)}">${esc(r.model.replace('kimi-code/',''))}</span></td>
     <td class="num">${fmtMs(r.ttft)}</td><td class="num">${fmtMs(r.dur)}</td>
