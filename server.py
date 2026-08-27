@@ -243,7 +243,9 @@ def api_sessions(q):
             "sid": r["sid"], "title": r["title"] or r["sid"][:13],
             "source": r.get("source", "kimi"), "requests": 0,
             "input": 0, "cacheRead": 0, "cacheCreate": 0, "output": 0,
-            "models": {}, "costs": {}})
+            "models": {}, "costs": {}, "cwd": ""})
+        if not a["cwd"] and r.get("cwd"):
+            a["cwd"] = r["cwd"]
         a["requests"] += 1
         for k in ("input", "cacheRead", "cacheCreate", "output"):
             a[k] += r[k]
@@ -258,6 +260,7 @@ def api_sessions(q):
         total_in = a["input"] + a["cacheRead"] + a["cacheCreate"]
         rows.append({
             "sid": a["sid"], "title": a["title"], "source": a["source"],
+            "cwd": a["cwd"],
             "model": max(a["models"], key=a["models"].get) if a["models"] else "?",
             "requests": a["requests"],
             "totalTokens": total_in + a["output"],
@@ -424,6 +427,7 @@ def api_requests(q):
             "time": datetime.fromtimestamp(r["time"] / 1000).strftime("%m-%d %H:%M:%S"),
             "ts": r["time"],
             "sid": r["sid"], "title": r["title"] or r["sid"][:13],
+            "cwd": r.get("cwd", ""),
             "source": r.get("source", "kimi"),
             "model": r["model"], "ttft": r["ttft"], "dur": r["dur"],
             "input": r["input"], "cacheRead": r["cacheRead"],

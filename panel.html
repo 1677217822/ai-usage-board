@@ -58,6 +58,7 @@
   h3:before{content:"";width:7px;height:7px;background:var(--accent);flex:none}
   h3 .muted{font-weight:400;font-family:"Segoe UI","Microsoft YaHei",sans-serif}
   .muted{color:var(--sub);font-size:12px}
+  .mini{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
   /* 筛选栏 */
   .filters{display:flex;gap:10px;align-items:center;margin-bottom:18px;flex-wrap:wrap}
   select,input{padding:7px 11px;border:1px solid var(--line);border-radius:6px;background:var(--card);
@@ -129,6 +130,7 @@
   .perf-row .pbar i.rh{background:var(--sage)}.perf-row .pbar i.rm{background:var(--ochre)}
   .perf-row .pbar i.rl{background:var(--accent)}.perf-row .pbar i.rn{background:var(--sub)}
   .perf-row .pmeta{font-size:11.5px;color:var(--sub);text-align:right;line-height:1.55}
+  .perf-row .pmeta .nw{white-space:nowrap}
   .legend{display:flex;gap:18px;justify-content:center;margin-top:12px;font-size:13px;color:var(--sub)}
   .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:1px}
   /* 图例/动态文本配色（随主题的变量类） */
@@ -349,6 +351,9 @@ const $=s=>document.querySelector(s);
 const fmtW=n=>n>=1e8?(n/1e8).toFixed(2)+' 亿':n>=1e4?(n/1e4).toFixed(1)+' 万':String(n);
 const fmtMs=ms=>ms==null?'-':ms>=6e4?(ms/6e4).toFixed(1)+'min':ms>=1000?(ms/1000).toFixed(1)+'s':ms+'ms';
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+/* 目录路径缩短：去掉 \\?\ 前缀，只留最后两段（完整路径放 tooltip） */
+const shortDir=p=>{const s=String(p||'').replace(/^[\\?]+/,'').replace(/[\\/]+$/,'');
+  const parts=s.split(/[\\/]/).filter(Boolean);return parts.length<=2?s:'…/'+parts.slice(-2).join('/')};
 let page=1, pageTotal=0;
 
 /* ---------- 时间范围 ---------- */
@@ -469,7 +474,7 @@ function renderSessions(){
     const rc=rate>=80?'rh':rate>=40?'rm':'rl';
     return`<tr class="expander" onclick="pickSession('${a.sid}')" title="点击筛选该会话">
     <td class="muted num">${i+1}</td>
-    <td>${esc(a.title.slice(0,30))}</td>
+    <td><div>${esc(a.title.slice(0,30))}</div>${a.cwd?`<div class="mini muted" title="${esc(a.cwd)}">${esc(shortDir(a.cwd))}</div>`:''}</td>
     <td><span class="tag ${SRC_TAG[a.source]||'b'}">${SRC_LABEL[a.source]||a.source}</span></td>
     <td><span class="tag ${modelCls(a.model)}">${esc(a.model)}</span></td>
     <td class="num">${a.requests}</td>
@@ -753,11 +758,12 @@ function renderPerf(){
   el.innerHTML=rows.map(r=>{
     const rate=r.hitRate==null?null:r.hitRate*100;
     const rc=rate==null?'rn':rate>=80?'rh':rate>=40?'rm':'rl';
-    const meta=[r.avgTtft?'首字 '+fmtMs(r.avgTtft):'',r.avgDur?'耗时 '+fmtMs(r.avgDur):'',r.speed?r.speed+' tok/s':'',r.requests+' 次'].filter(Boolean).join(' · ');
+    const meta=[rate==null?null:rate.toFixed(1)+'%',r.avgTtft?'首字 '+fmtMs(r.avgTtft):'',r.avgDur?'耗时 '+fmtMs(r.avgDur):'',r.speed?r.speed+' tok/s':'',r.requests+' 次']
+      .filter(Boolean).map(x=>`<span class="nw">${x}</span>`).join(' · ');
     return`<div class="perf-row" title="${esc(r.model)} · ${r.sources.map(s=>SRC_NAMES[s]||s).join('/')}">
       <span class="mn">${esc(r.model)}</span>
       <span class="pbar"><i class="${rc}" style="width:${rate==null?0:rate.toFixed(1)}%"></i></span>
-      <span class="pmeta num">${rate==null?'—':rate.toFixed(1)+'%'} · ${meta}</span></div>`}).join('');
+      <span class="pmeta num">${meta||'—'}</span></div>`}).join('');
 }
 
 /* ---------- 统计速览墙 ---------- */
@@ -802,13 +808,14 @@ function drawSankey(){
   H=Math.max(440,models.length*30+60,srcs.length*36+60);
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   svg.style.height=H+'px';
-  const scL=(H-gL*(srcs.length-1))/(srcs.reduce((s,x)=>s+x.v,0)||1);
-  const scR=(H-gR*(models.length-1))/total;
+  const HB=H-26;  /* 布局底部预留 26px，防止最后一行标签被裁 */
+  const scL=(HB-gL*(srcs.length-1))/(srcs.reduce((s,x)=>s+x.v,0)||1);
+  const scR=(HB-gR*(models.length-1))/total;
   let y=0;const L={},R={};
   srcs.forEach(({s,v})=>{L[s]={y,h:v*scL};y+=v*scL+gL});
   y=0;models.forEach(({m,v,mi})=>{R[m]={y,h:v*scR,mi};y+=v*scR+gR});
   /* 左右留足标签位，避免文字被画布裁掉 */
-  const x0=160,x1=W-190;
+  const x0=160,x1=W-200;
   const offL={},offR={};
   srcs.forEach(({s})=>offL[s]=L[s].y);
   models.forEach(({m})=>offR[m]=R[m].y);
@@ -820,21 +827,21 @@ function drawSankey(){
     const ya=offL[lk.s],yb=offR[lk.m];
     offL[lk.s]+=ta;offR[lk.m]+=tb;
     const mx=(x0+NR+x1)/2;
-    paths.push({i,lk,c:SRC_COLORS[lk.s]||'#8f887a',
+    paths.push({i:paths.length,lk,c:SRC_COLORS[lk.s]||'#8f887a',
       d:`M${x0+NR},${ya.toFixed(1)}C${mx},${ya.toFixed(1)} ${mx},${yb.toFixed(1)} ${x1},${yb.toFixed(1)}`
        +`L${x1},${(yb+tb).toFixed(1)}C${mx},${(yb+tb).toFixed(1)} ${mx},${(ya+ta).toFixed(1)} ${x0+NR},${(ya+ta).toFixed(1)}Z`});
   });
-  let g=paths.map(p=>`<path class="lk" data-i="${p.i}" d="${p.d}" fill="${p.c}" fill-opacity=".32"/>`).join('');
+  let g=paths.map(p=>`<path class="lk" data-i="${p.i}" d="${p.d}" fill="${p.c}" fill-opacity=".5"/>`).join('');
   srcs.forEach(({s,v})=>{const n=L[s];
     g+=`<rect class="nd" data-s="${s}" x="${x0}" y="${n.y}" width="${NR}" height="${Math.max(2,n.h)}" fill="${SRC_COLORS[s]||'#8f887a'}"/>`
       +`<text x="${x0-8}" y="${(n.y+n.h/2+4).toFixed(1)}" text-anchor="end" font-size="12" fill="${ink.txt}" style="pointer-events:none">${SRC_NAMES[s]||s} ${fmtW(v)}</text>`;});
   models.forEach(({m,v,mi})=>{const n=R[m];
     g+=`<rect class="ndm" data-m="${esc(m)}" x="${x1}" y="${n.y}" width="${NR}" height="${Math.max(2,n.h)}" fill="${DONUT_COLORS[mi%DONUT_COLORS.length]}"/>`
-      +`<text x="${x1+NR+8}" y="${(n.y+n.h/2+4).toFixed(1)}" font-size="12" fill="${ink.txt}" style="pointer-events:none">${esc(m)} ${fmtW(v)}</text>`;});
+      +`<text x="${x1+NR+8}" y="${(n.y+n.h/2+4).toFixed(1)}" font-size="12" fill="${ink.txt}" style="pointer-events:none">${esc(m.length>16?m.slice(0,15)+'…':m)} ${fmtW(v)}</text>`;});
   svg.innerHTML=g;
   const tip=$('#tooltip');
   const allPaths=[...svg.querySelectorAll('.lk')];
-  const dim=el=>allPaths.forEach(p=>p.setAttribute('fill-opacity',el==null?'.32':(p===el?'.78':'.07')));
+  const dim=el=>allPaths.forEach(p=>p.setAttribute('fill-opacity',el==null?'.5':(p===el?'.85':'.12')));
   allPaths.forEach(p=>{
     const lk=paths[+p.dataset.i].lk;
     p.onmouseenter=()=>{dim(p);
@@ -845,12 +852,12 @@ function drawSankey(){
     p.onclick=()=>pickModel(lk.m,(lastModels.find(x=>x.model===lk.m)||{}).sources);
   });
   svg.querySelectorAll('.nd').forEach(n=>{
-    n.onmouseenter=()=>allPaths.forEach(p=>p.setAttribute('fill-opacity',paths[+p.dataset.i].lk.s===n.dataset.s?'.7':'.07'));
+    n.onmouseenter=()=>allPaths.forEach(p=>p.setAttribute('fill-opacity',paths[+p.dataset.i].lk.s===n.dataset.s?'.85':'.12'));
     n.onmouseleave=()=>dim(null);
     n.onclick=()=>{$('#f-source').value=n.dataset.s;rebuildSubFilters($('#f-session-q').value.trim());
       page=1;refreshStats();toast('已筛选 '+(SRC_NAMES[n.dataset.s]||n.dataset.s),'ok');};});
   svg.querySelectorAll('.ndm').forEach(n=>{
-    n.onmouseenter=()=>allPaths.forEach(p=>p.setAttribute('fill-opacity',paths[+p.dataset.i].lk.m===n.dataset.m?'.7':'.07'));
+    n.onmouseenter=()=>allPaths.forEach(p=>p.setAttribute('fill-opacity',paths[+p.dataset.i].lk.m===n.dataset.m?'.85':'.12'));
     n.onmouseleave=()=>dim(null);
     n.onclick=()=>pickModel(n.dataset.m,(lastModels.find(x=>x.model===n.dataset.m)||{}).sources);});
 }
@@ -1088,7 +1095,7 @@ function renderRows(){
         </div>
         <span class="muted">构成：新增输入 ${r.input.toLocaleString()} · 缓存命中 ${r.cacheRead.toLocaleString()} · 缓存创建 ${r.cacheCreate.toLocaleString()} · 输出 ${r.output.toLocaleString()}</span>
       </div>
-      <div class="muted" style="margin-top:8px">会话 <span class="num">${esc(r.sid)}</span> · 模型 ${esc(r.model)} · agent ${esc(r.agent)} · 首字 ${fmtMs(r.ttft)} · 耗时 ${fmtMs(r.dur)} · 结束 ${esc(r.finish||'-')}</div>
+      <div class="muted" style="margin-top:8px">会话 <span class="num">${esc(r.sid)}</span>${r.cwd?` · 目录 <span title="${esc(r.cwd)}">${esc(shortDir(r.cwd))}</span>`:''} · 模型 ${esc(r.model)} · agent ${esc(r.agent)} · 首字 ${fmtMs(r.ttft)} · 耗时 ${fmtMs(r.dur)} · 结束 ${esc(r.finish||'-')}</div>
       </td></tr>`;
     }
     return h}).join('')||'<tr><td colspan="13" class="muted">无数据</td></tr>';
@@ -1116,6 +1123,8 @@ async function loadMeta(){
   META=await fetch('/api/meta').then(r=>r.json());
   $('#f-source').innerHTML='<option value="">全部来源</option>'
     +META.sources.map(s=>`<option value="${esc(s)}" ${s==='kimi'?'selected':''}>${SRC_NAMES[s]||esc(s)}</option>`).join('');
+  const us=new URLSearchParams(location.search).get('source');
+  if(us!==null)$('#f-source').value=us;   // ?source= 空值即全部来源，便于分享链接
   rebuildSubFilters();
 }
 /* 来源变化时，模型/会话下拉重建为该来源的子集（全部来源=合并去重）；kw=会话搜索词 */
@@ -1159,6 +1168,12 @@ setTheme(localStorage.getItem('theme')==='dark');
 
 setInterval(()=>{const t=new Date();$('#clock').textContent=t.toLocaleTimeString('zh-CN');
   refreshStats();},10000);
+/* URL 参数初始化：?range=all 预设时间范围（分享链接/截图定位用） */
+{
+  const r=new URLSearchParams(location.search).get('range');
+  if(r&&pillDesc[r]){rangeMode={range:r};
+    document.querySelectorAll('#range-pills button').forEach(x=>x.classList.toggle('on',x.dataset.r===r));}
+}
 loadMeta().then(refreshStats);
 </script>
 </body>

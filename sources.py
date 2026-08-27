@@ -16,8 +16,10 @@ sources.py — 其他 AI 终端的用量日志适配器
    cost(None=未知), sid, title, cwd, agent}
 """
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote
 
 HOME = Path.home()
 _CACHE = {}
@@ -57,16 +59,31 @@ def _rec(time, source, model, usage, **kw):
             "cwd": kw.get("cwd", ""), "agent": kw.get("agent", "main")}
 
 
+def _clean_title_line(t, limit=60):
+    """取第一行「像人话」的文本：跳过 XML/Markdown 头/代码/日志噪声，折叠空白。"""
+    for ln in (t or "").splitlines():
+        ln = " ".join(ln.split())
+        if not ln or ln[0] in "#<>`$-|":
+            continue
+        low = ln.lower()
+        if "instructions" in low or "tcp socket" in low or "agents.md" in low:
+            continue
+        if re.match(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}", ln):  # 粘贴的日志行
+            continue
+        return ln[:limit]
+    return ""
+
+
 def _first_text(content, limit=60):
     """从各家消息 content 里提取第一段用户文本做会话标题（跳过 XML 上下文块）。"""
     if isinstance(content, str):
-        return "" if content.lstrip().startswith("<") else content[:limit]
+        return _clean_title_line(content, limit)
     if isinstance(content, list):
         for c in content:
             if isinstance(c, dict) and c.get("type") in ("text", "input_text"):
-                t = c.get("text", "")
-                if t.strip() and not t.lstrip().startswith("<"):
-                    return t[:limit]
+                t = _clean_title_line(c.get("text", ""), limit)
+                if t:
+                    return t
     return ""
 
 
@@ -118,9 +135,37 @@ def _parse_claude(path):
 
 # ---------- OpenAI Codex ----------
 
+def _codex_names():
+    """~/.codex/session_index.jsonl → {thread_id: 会话名}（codex 自动命名/用户改名）。
+    带 (size, mtime) 缓存。"""
+    idx_file = HOME / ".codex" / "session_index.jsonl"
+    try:
+        st = idx_file.stat()
+    except Exception:
+        return {}
+    sig = (st.st_size, st.st_mtime)
+    key = ("codex", "index")
+    if _CACHE.get(key, (None,))[0] == sig:
+        return _CACHE[key][1]
+    out = {}
+    try:
+        with idx_file.open(encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("id") and d.get("thread_name"):
+                    out[d["id"]] = " ".join(str(d["thread_name"]).split())[:60]
+    except Exception:
+        pass
+    _CACHE[key] = (sig, out)
+    return out
+
+
 def _parse_codex(path):
     out = []
-    title, cwd, model = "", "", ""
+    title, cwd, model, sid = "", "", "", ""
     with path.open(encoding="utf-8", errors="ignore") as f:
         for line in f:
             if "token_count" not in line and "session_meta" not in line \
@@ -133,6 +178,7 @@ def _parse_codex(path):
             p = d.get("payload", {})
             pt = p.get("type")
             if d.get("type") == "session_meta":
+                sid = sid or p.get("session_id") or p.get("id") or ""
                 cwd = cwd or p.get("cwd", "")
                 model = model or p.get("model", "")
             elif pt == "turn_context":
@@ -149,9 +195,14 @@ def _parse_codex(path):
                     "input": u.get("input_tokens", 0),
                     "cacheRead": u.get("cached_input_tokens", 0),
                     "output": u.get("output_tokens", 0) + u.get("reasoning_output_tokens", 0),
-                }, sid=p.get("info", {}).get("session_id", "") or path.stem))
+                }, sid=sid or p.get("info", {}).get("session_id", "") or path.stem))
+    # 会话名优先用 codex 索引里的命名（sid 与 rollout 文件名里的 UUID 都可能命中）
+    names = _codex_names()
+    tail = path.stem.rsplit("-", 5)[-5:]
+    uuid = "-".join(tail) if len(tail) == 5 else ""
+    named = names.get(sid) or names.get(uuid) or ""
     for r in out:
-        r["title"], r["cwd"] = title or path.stem[:20], cwd
+        r["title"], r["cwd"] = named or title or path.stem[:20], cwd
         if model:
             r["model"] = model
     return out
@@ -199,12 +250,16 @@ def _parse_pi(path):
 
 # ---------- Grok CLI ----------
 
-def _grok_titles():
-    """sid -> (首条用户消息, cwd)"""
+def _grok_meta():
+    """sid -> (首条用户消息, cwd)；cwd 由 URL 编码的上级目录名还原。"""
     out = {}
     root = HOME / ".grok" / "sessions"
     for ch in root.glob("*/*/chat_history.jsonl"):
         sid = ch.parent.name
+        cwd = unquote(ch.parent.parent.name)
+        if not re.match(r"^([A-Za-z]:[\\/]|/)", cwd):
+            cwd = ""
+        title = ""
         for line in ch.open(encoding="utf-8", errors="ignore"):
             if '"type":"user"' not in line:
                 continue
@@ -214,13 +269,14 @@ def _grok_titles():
                 continue
             t = d.get("text") or _first_text(d.get("content"))
             if t and not t.lstrip().startswith("<"):
-                out[sid] = t[:60]
+                title = t[:60]
                 break
+        out[sid] = (title, cwd)
     return out
 
 
 def _parse_grok(path):
-    titles = _grok_titles()
+    metas = _grok_meta()
     out = []
     with path.open(encoding="utf-8", errors="ignore") as f:
         for line in f:
@@ -235,12 +291,13 @@ def _parse_grok(path):
             if not ts or "prompt_tokens" not in c:
                 continue
             sid = d.get("sid", "")
+            title, cwd = metas.get(sid, ("", ""))
             out.append(_rec(ts, "grok", "grok", {
                 "input": c.get("prompt_tokens", 0),
                 "cacheRead": c.get("cached_prompt_tokens", 0),
                 "output": c.get("completion_tokens", 0) + c.get("reasoning_tokens", 0),
             }, ttft=c.get("ttft_ms"), dur=c.get("model_elapsed_ms"),
-                sid=sid, title=titles.get(sid, "")))
+                sid=sid, title=title, cwd=cwd))
     return out
 
 

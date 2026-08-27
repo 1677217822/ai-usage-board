@@ -11,6 +11,7 @@ tokenscope.py — AI 使用日志核心库：读取本地各 AI 终端的会话�
            finish, sid, title, cwd, agent, source, cost(None=未知)}
 """
 import json
+import re
 from pathlib import Path
 
 HOME = Path.home()
@@ -32,6 +33,21 @@ def config():
 
 
 _REQ_CACHE = {}
+
+
+def _clean_title(t):
+    """kimi 会话标题清洗：折叠空白成单行；明显是粘贴的日志/指令噪声则丢弃。
+    注意 kimi 自己会生成 <xx> 式标题，不能以首字符 < 判噪声；但整个标题被
+    一对 <> 包住时（自动标题或用户改名都会被包一层），剥掉括号再展示。"""
+    t = " ".join((t or "").split())
+    low = t.lower()
+    if t and ("instructions" in low or "tcp socket" in low or "agents.md" in low
+              or re.match(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}", t)):  # 粘贴的日志
+        return ""
+    if len(t) > 2 and t[0] == "<" and t[-1] == ">" \
+            and "<" not in t[1:-1] and ">" not in t[1:-1]:
+        t = t[1:-1].strip()
+    return t
 
 
 def _parse_wire_requests(wire_path):
@@ -92,7 +108,7 @@ def request_records():
         for wire in state_path.parent.glob("agents/*/wire.jsonl"):
             for rec in _parse_wire_requests(wire):
                 r = dict(rec)
-                r.update({"sid": sid, "title": st.get("title") or "",
+                r.update({"sid": sid, "title": _clean_title(st.get("title")),
                           "cwd": st.get("cwd", ""), "agent": wire.parent.name,
                           "source": "kimi"})
                 out.append(r)
